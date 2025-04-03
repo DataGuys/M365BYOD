@@ -1,0 +1,42 @@
+{
+  "@odata.type": "#microsoft.graph.androidManagedAppProtection",
+  "displayName": "Graph MAM Android Policy",
+  "description": "Graph MAM Android Policy",
+  "periodOfflineBeforeAccessCheck": "PT12H",
+  "periodOnlineBeforeAccessCheck": "PT30M",
+  "allowedInboundDataTransferSources": "allApps",
+  "allowedOutboundDataTransferDestinations": "allApps",
+  "organizationalCredentialsRequired": false,
+  "allowedOutboundClipboardSharingLevel": "allApps",
+  "dataBackupBlocked": true,
+  "deviceComplianceRequired": true,
+  "managedBrowserToOpenLinksRequired": true,
+  "saveAsBlocked": true,
+  "periodOfflineBeforeWipeIsEnforced": "P90D",
+  "pinRequired": true,
+  "maximumPinRetries": 5,
+  "simplePinBlocked": true,
+  "minimumPinLength": 4,
+  "pinCharacterSet": "numeric",
+  "allowedDataStorageLocations": [],
+  "contactSyncBlocked": true,
+  "printBlocked": true,
+  "fingerprintBlocked": true,
+  "appDataEncryptionType": "afterDeviceRestart",
+
+  "apps": [
+    {
+        "mobileAppIdentifier": {
+        "@odata.type": "#microsoft.graph.androidMobileAppIdentifier",
+        "packageId": "com.microsoft.office.outlook"
+        }
+    },
+    {
+        "mobileAppIdentifier": {
+        "@odata.type": "#microsoft.graph.androidMobileAppIdentifier",
+        "packageId": "com.microsoft.office.excel"
+        }
+    }
+
+    ]
+}
