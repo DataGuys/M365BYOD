@@ -65,7 +65,7 @@ Write-Host "Connected successfully."
 
 # Grab the token from the current session
 $mgContext = Get-MgContext
-if (-not $mgContext.AccessToken) {
+if (-not $mgContext.Scopes) {
     Write-Error "No access token found. Verify you've signed in and have the proper permissions."
     return
 }
