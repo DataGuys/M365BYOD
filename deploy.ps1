@@ -18,6 +18,10 @@ This script:
 
 # Prompt up to 2 break-glass accounts (UPNs).
 # If user hits Enter with no input, we skip that entry.
+Install-Module -Name Microsoft.Graph.Intune
+Connect-MSGraph -AdminConsent
+Update-MSGraphEnvironment -SchemaVersion 'beta'
+
 Write-Host "Designed to run in the Azure Cloud Shell" -ForegroundColor Yellow
 Write-Host "Enter the UPNs of up to two break-glass accounts (press Enter to skip if none)." -ForegroundColor Green
 $breakGlassUPN1 = Read-Host "Break-glass account #1 (UPN)"
