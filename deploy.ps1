@@ -1,56 +1,18 @@
 <#
 .SYNOPSIS
-Creates:
-- A PoC security group.
-- Two MAM (App Protection) policies for iOS and Android, assigned to that group.
-- A Conditional Access policy targeting ONLY Office 365 ("CommonOffice365"),
-  requiring "Compliant device" OR "AppProtection", while excluding:
-  - Up to two break-glass accounts (prompted)
-  - Any service accounts (prompted).
+Creates a PoC security group for BYOD implementation with Intune MAM and Conditional Access.
 
 .DESCRIPTION
-1) Prompts for up to two break-glass accounts' UPNs.  
-2) Prompts for any service account UPNs.  
-3) Connects to Microsoft Graph with the needed scopes.
-4) Uses Microsoft Graph SDK to create & configure the resources in Intune and Entra ID.
-5) Includes improved permission checks and error handling.
+This script:
+1) Creates a security group for BYOD testing
+2) Resolves break-glass and service accounts for documentation
+3) Provides guidance in comments for manual policy creation in the portals
 
 .NOTES
-- Requires Admin permissions for Microsoft Graph, Intune, and Conditional Access.
-- Requires the Microsoft.Graph.Authentication module.
+- Created to address permission issues with Microsoft Graph API for Intune and CA policies
+- Only requires Directory.ReadWrite.All permission which is more commonly available
+- After creating the group, use the admin portals to create the MAM and CA policies
 #>
-
-### --- 0. HELPER FUNCTIONS ---
-
-function Test-GraphPermission {
-    param (
-        [Parameter(Mandatory=$true)]
-        [string]$PermissionName,
-        
-        [Parameter(Mandatory=$true)]
-        [string]$ResourceName
-    )
-    
-    try {
-        $context = Get-MgContext
-        if (-not $context) {
-            Write-Warning "Not connected to Microsoft Graph."
-            return $false
-        }
-        
-        # Simple permission check - not comprehensive but helpful
-        if ($context.Scopes -contains $PermissionName) {
-            Write-Host "✓ Permission verified: $PermissionName" -ForegroundColor Green
-            return $true
-        } else {
-            Write-Warning "✗ Missing permission: $PermissionName required for $ResourceName"
-            return $false
-        }
-    } catch {
-        Write-Warning "Error checking permissions: $_"
-        return $false
-    }
-}
 
 ### --- 1. PROMPT FOR BREAK-GLASS & SERVICE ACCOUNTS ---
 
@@ -71,6 +33,16 @@ while ($true) {
     $serviceAccountUPNs += $sa
 }
 
+# Prompt for users to include in the PoC group (optional)
+Write-Host "Enter the UPNs of any users to include in the PoC group (one per line)."
+Write-Host "Press Enter on an empty line to finish."
+$includeUserUPNs = @()
+while ($true) {
+    $user = Read-Host "User to include in PoC group (or Enter to finish)"
+    if ([string]::IsNullOrWhiteSpace($user)) { break }
+    $includeUserUPNs += $user
+}
+
 Write-Host "Break-glass accounts provided:"
 if ($breakGlassUPN1) { Write-Host "   $breakGlassUPN1" }
 if ($breakGlassUPN2) { Write-Host "   $breakGlassUPN2" }
@@ -80,20 +52,19 @@ if ($serviceAccountUPNs.Count -gt 0) {
 } else {
     Write-Host "No service accounts provided."
 }
+if ($includeUserUPNs.Count -gt 0) {
+    Write-Host "Users to include in PoC group:"
+    $includeUserUPNs | ForEach-Object { Write-Host "   $_" }
+} else {
+    Write-Host "No users specified for PoC group."
+}
 Write-Host ""
 
-### --- 2. CONNECT TO MS GRAPH WITH ALL REQUIRED SCOPES ---
+### --- 2. CONNECT TO MS GRAPH ---
 $requiredScopes = @(
-    "Directory.ReadWrite.All",                # For group management
-    "User.Read.All",                          # For user lookups
-    "DeviceManagementApps.ReadWrite.All",     # For MAM policies
-    "Policy.ReadWrite.ConditionalAccess",     # For CA policies
-    "Application.Read.All"                    # For app registration lookups
+    "Directory.ReadWrite.All",  # For group management
+    "User.Read.All"             # For user lookups
 )
-
-Write-Host "This script requires admin consent for these permissions:" -ForegroundColor Yellow
-$requiredScopes | ForEach-Object { Write-Host "   • $_" }
-Write-Host ""
 
 Write-Host "Connecting to Microsoft Graph with required scopes..."
 try {
@@ -113,35 +84,10 @@ try {
     return
 }
 
-### --- 3. CHECK PERMISSIONS BEFORE PROCEEDING ---
-Write-Host "Checking permissions..." -ForegroundColor Cyan
+### --- 3. RESOLVE USER UPNs TO OBJECT IDs ---
+Write-Host "`nResolving user UPNs to object IDs..." -ForegroundColor Cyan
 
-$permissionChecks = @(
-    @{ Name = "Directory.ReadWrite.All"; Resource = "Groups & Users" },
-    @{ Name = "DeviceManagementApps.ReadWrite.All"; Resource = "App Protection Policies" },
-    @{ Name = "Policy.ReadWrite.ConditionalAccess"; Resource = "Conditional Access Policies" }
-)
-
-$permissionsMissing = $false
-foreach ($permission in $permissionChecks) {
-    if (-not (Test-GraphPermission -PermissionName $permission.Name -ResourceName $permission.Resource)) {
-        $permissionsMissing = $true
-    }
-}
-
-if ($permissionsMissing) {
-    Write-Warning "Some required permissions are missing. The script may fail for certain operations."
-    $proceed = Read-Host "Do you want to proceed anyway? (Y/N)"
-    if ($proceed -ne "Y") {
-        Write-Host "Script aborted by user." -ForegroundColor Red
-        return
-    }
-}
-
-### --- 4. RESOLVE BREAK-GLASS & SERVICE ACCOUNTS TO OBJECT IDs ---
-Write-Host "`nResolving break-glass and service account UPNs to user object IDs..." -ForegroundColor Cyan
-
-# We'll collect all user UPNs that we need to exclude
+# Collect all break-glass and service accounts (to document)
 $excludeUserUPNs = @()
 if ($breakGlassUPN1) { $excludeUserUPNs += $breakGlassUPN1 }
 if ($breakGlassUPN2) { $excludeUserUPNs += $breakGlassUPN2 }
@@ -150,7 +96,6 @@ if ($serviceAccountUPNs.Count -gt 0) {
 }
 
 $excludeUserObjectIds = @()
-
 foreach ($upn in $excludeUserUPNs) {
     try {
         # Get user by UPN using Graph SDK
@@ -165,138 +110,92 @@ foreach ($upn in $excludeUserUPNs) {
     }
 }
 
-Write-Host ""
+# Resolve users to include in the PoC group
+$includeUserObjectIds = @()
+foreach ($upn in $includeUserUPNs) {
+    try {
+        # Get user by UPN using Graph SDK
+        $user = Get-MgUser -Filter "userPrincipalName eq '$upn'" -ErrorAction Stop
+        
+        if ($user) {
+            Write-Host "  Found $upn => Object ID: $($user.Id)" -ForegroundColor Green
+            $includeUserObjectIds += $user.Id
+        }
+    } catch {
+        Write-Warning "  Could not find user with UPN=$upn. Error: $_"
+    }
+}
 
-### --- 5. CREATE A POC SECURITY GROUP ---
+### --- 4. CREATE A POC SECURITY GROUP ---
 Write-Host "`n--- Creating PoC Security Group ---" -ForegroundColor Cyan
 try {
     $groupParams = @{
-        DisplayName = "PoC Testing Group"
+        DisplayName = "BYOD PoC Testing Group"
         Description = "Security group for MAM+CA PoC"
         MailEnabled = $false
-        MailNickname = "pocTestingGroup"
+        MailNickname = "byodPoCTestingGroup"
         SecurityEnabled = $true
     }
 
     $pocGroup = New-MgGroup @groupParams
     Write-Host "Created group with Id: $($pocGroup.Id)" -ForegroundColor Green
+    
+    # If we have users to add to the group, add them now
+    if ($includeUserObjectIds.Count -gt 0) {
+        Write-Host "Adding users to the PoC group..." -ForegroundColor Cyan
+        foreach ($userId in $includeUserObjectIds) {
+            try {
+                New-MgGroupMember -GroupId $pocGroup.Id -DirectoryObjectId $userId
+                Write-Host "  Added user with ID: $userId to the group" -ForegroundColor Green
+            } catch {
+                Write-Warning "  Failed to add user with ID: $userId to the group. Error: $_"
+            }
+        }
+    }
 } catch {
     Write-Error "Failed to create security group: $_"
-    $pocGroup = $null
-}
-
-if (-not $pocGroup) {
-    Write-Warning "Cannot continue without creating the security group."
     return
 }
 
-### --- 6. CREATE iOS MAM POLICY ---
-Write-Host "`n--- Creating iOS MAM Policy ---" -ForegroundColor Cyan
+### --- 5. EXPORT SETTINGS FOR MANUAL POLICY CREATION ---
+# Create a settings file to help with manual policy creation
+$dateTime = Get-Date -Format "yyyy-MM-dd_HH-mm-ss"
+$settingsFile = "BYOD_PoC_Settings_$dateTime.json"
 
-try {
-    $iosBody = @{
-        displayName = "iOS App Protection Policy"
-        description = "Block cut/copy/paste, Save As, and printing for iOS."
-        allowedClipboardSharingLevel = "managedApps"
-        allowedInboundDataTransferSources = "managedApps"
-        allowedOutboundDataTransferDestinations = "managedApps"
-        saveAsBlocked = $true
-        printBlocked = $true
-        faceIdBlocked = $false
+$settings = @{
+    GroupInfo = @{
+        DisplayName = "BYOD PoC Testing Group"
+        Id = $pocGroup.Id
     }
-
-    # Use Beta endpoint as it might have better support
-    $iosPolicy = Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/beta/deviceAppManagement/iosManagedAppProtections" -Body ($iosBody | ConvertTo-Json -Depth 10)
-    
-    if ($iosPolicy.id) {
-        Write-Host "Created iOS MAM policy with Id: $($iosPolicy.id)" -ForegroundColor Green
-    } else {
-        Write-Warning "iOS policy created but no ID was returned."
-    }
-} catch {
-    Write-Error "Failed to create iOS MAM policy: $_"
-    $iosPolicy = $null
-}
-
-### --- 7. CREATE ANDROID MAM POLICY ---
-Write-Host "`n--- Creating Android MAM Policy ---" -ForegroundColor Cyan
-try {
-    $androidBody = @{
-        displayName = "Android App Protection Policy"
-        description = "Block cut/copy/paste, Save As, and printing for Android."
-        allowedClipboardSharingLevel = "managedApps"
-        allowedInboundDataTransferSources = "managedApps"
-        allowedOutboundDataTransferDestinations = "managedApps"
-        saveAsBlocked = $true
-        printBlocked = $true
-    }
-
-    # Use Beta endpoint as it might have better support
-    $androidPolicy = Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/beta/deviceAppManagement/androidManagedAppProtections" -Body ($androidBody | ConvertTo-Json -Depth 10)
-    
-    if ($androidPolicy.id) {
-        Write-Host "Created Android MAM policy with Id: $($androidPolicy.id)" -ForegroundColor Green
-    } else {
-        Write-Warning "Android policy created but no ID was returned."
-    }
-} catch {
-    Write-Error "Failed to create Android MAM policy: $_"
-    $androidPolicy = $null
-}
-
-### --- 8. ASSIGN MAM POLICIES TO THE POC GROUP ---
-# Only attempt assignment if we have policies AND their IDs
-if ($iosPolicy -and $iosPolicy.id) {
-    Write-Host "`n--- Assigning iOS MAM Policy to PoC Group ---" -ForegroundColor Cyan
-    try {
-        $iosAssignBody = @{
-            assignments = @(
-                @{
-                    "@odata.type" = "#microsoft.graph.targetedManagedAppPolicyAssignment"
-                    target = @{
-                        "@odata.type" = "#microsoft.graph.groupAssignmentTarget"
-                        groupId = $pocGroup.Id
-                    }
-                }
-            )
+    ExcludedAccounts = @()
+    MAMPolicyInfo = @{
+        iOS = @{
+            DisplayName = "iOS App Protection Policy"
+            Description = "Block cut/copy/paste, Save As, and printing for iOS."
+            Settings = @{
+                AllowedClipboardSharingLevel = "managedApps"
+                AllowedInboundDataTransferSources = "managedApps"
+                AllowedOutboundDataTransferDestinations = "managedApps"
+                SaveAsBlocked = $true
+                PrintBlocked = $true
+                FaceIdBlocked = $false
+            }
         }
-
-        Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/beta/deviceAppManagement/iosManagedAppProtections/$($iosPolicy.id)/assign" -Body ($iosAssignBody | ConvertTo-Json -Depth 10)
-        Write-Host "Assigned iOS MAM policy to PoC group." -ForegroundColor Green
-    } catch {
-        Write-Error "Failed to assign iOS MAM policy: $_"
-    }
-}
-
-if ($androidPolicy -and $androidPolicy.id) {
-    Write-Host "`n--- Assigning Android MAM Policy to PoC Group ---" -ForegroundColor Cyan
-    try {
-        $androidAssignBody = @{
-            assignments = @(
-                @{
-                    "@odata.type" = "#microsoft.graph.targetedManagedAppPolicyAssignment"
-                    target = @{
-                        "@odata.type" = "#microsoft.graph.groupAssignmentTarget"
-                        groupId = $pocGroup.Id
-                    }
-                }
-            )
+        Android = @{
+            DisplayName = "Android App Protection Policy"
+            Description = "Block cut/copy/paste, Save As, and printing for Android."
+            Settings = @{
+                AllowedClipboardSharingLevel = "managedApps"
+                AllowedInboundDataTransferSources = "managedApps"
+                AllowedOutboundDataTransferDestinations = "managedApps"
+                SaveAsBlocked = $true
+                PrintBlocked = $true
+            }
         }
-
-        Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/beta/deviceAppManagement/androidManagedAppProtections/$($androidPolicy.id)/assign" -Body ($androidAssignBody | ConvertTo-Json -Depth 10)
-        Write-Host "Assigned Android MAM policy to PoC group." -ForegroundColor Green
-    } catch {
-        Write-Error "Failed to assign Android MAM policy: $_"
     }
-}
-
-### --- 9. CREATE CONDITIONAL ACCESS POLICY ---
-Write-Host "`n--- Creating Conditional Access Policy ---" -ForegroundColor Cyan
-try {
-    # Create parameters for New-MgIdentityConditionalAccessPolicy
-    $caParams = @{
+    ConditionalAccessInfo = @{
         DisplayName = "Require Compliant or Protected Apps for O365 (PoC)"
-        State = "enabled"  # can be "enabled", "disabled", or "enabledForReportingButNotEnforced"
+        State = "enabled"
         Conditions = @{
             Users = @{
                 IncludeGroups = @($pocGroup.Id)
@@ -311,60 +210,87 @@ try {
             BuiltInControls = @("compliantDevice", "approvedApplication")
         }
     }
+}
 
-    # Try alternative approach if New-MgIdentityConditionalAccessPolicy fails
+# Add excluded account details to the settings
+foreach ($upn in $excludeUserUPNs) {
     try {
-        $caPolicy = New-MgIdentityConditionalAccessPolicy -BodyParameter $caParams
-    } catch {
-        Write-Warning "Standard CA policy creation failed: $_"
-        Write-Host "Trying alternative method..." -ForegroundColor Yellow
+        $user = Get-MgUser -Filter "userPrincipalName eq '$upn'" -ErrorAction SilentlyContinue
         
-        # Try using Invoke-MgGraphRequest directly
-        $caPolicy = Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/beta/identity/conditionalAccess/policies" -Body ($caParams | ConvertTo-Json -Depth 10)
+        if ($user) {
+            $settings.ExcludedAccounts += @{
+                UPN = $upn
+                Id = $user.Id
+                DisplayName = $user.DisplayName
+            }
+        } else {
+            $settings.ExcludedAccounts += @{
+                UPN = $upn
+                Id = "Not Found"
+                DisplayName = "Not Found"
+            }
+        }
+    } catch {
+        $settings.ExcludedAccounts += @{
+            UPN = $upn
+            Id = "Error retrieving"
+            DisplayName = "Error retrieving"
+        }
     }
-    
-    if ($caPolicy.Id) {
-        Write-Host "Created CA policy with Id: $($caPolicy.Id)" -ForegroundColor Green
-    } else {
-        Write-Warning "CA policy may have been created but no ID was returned."
-    }
-} catch {
-    Write-Error "Failed to create Conditional Access policy: $_"
-    $caPolicy = $null
 }
 
-### --- 10. SUMMARY ---
-Write-Host "`n===== DEPLOYMENT SUMMARY =====" -ForegroundColor Green
+# Export the settings to a JSON file
+$settings | ConvertTo-Json -Depth 10 | Out-File -FilePath $settingsFile
+Write-Host "`nExported settings to: $settingsFile" -ForegroundColor Green
+
+### --- 6. PRINT MANUAL SETUP INSTRUCTIONS ---
+Write-Host "`n===== MANUAL SETUP INSTRUCTIONS =====" -ForegroundColor Yellow
+Write-Host "Due to permission limitations, you need to manually create the following in the admin portals:" -ForegroundColor Yellow
+
+Write-Host "`n1. CREATE iOS MAM POLICY"
+Write-Host "   a. Go to: https://intune.microsoft.com/"
+Write-Host "   b. Navigate to Apps > App protection policies"
+Write-Host "   c. Click '+ Create policy' and select iOS/iPadOS"
+Write-Host "   d. Name: 'iOS App Protection Policy'"
+Write-Host "   e. Description: 'Block cut/copy/paste, Save As, and printing for iOS.'"
+Write-Host "   f. Configure these settings:"
+Write-Host "      - Data Transfer: Allow only to managed apps"
+Write-Host "      - Save As: Block"
+Write-Host "      - Printing: Block"
+Write-Host "   g. Assign to the group with ID: $($pocGroup.Id)"
+
+Write-Host "`n2. CREATE ANDROID MAM POLICY"
+Write-Host "   a. Go to: https://intune.microsoft.com/"
+Write-Host "   b. Navigate to Apps > App protection policies"
+Write-Host "   c. Click '+ Create policy' and select Android"
+Write-Host "   d. Name: 'Android App Protection Policy'"
+Write-Host "   e. Description: 'Block cut/copy/paste, Save As, and printing for Android.'"
+Write-Host "   f. Configure these settings:"
+Write-Host "      - Data Transfer: Allow only to managed apps"
+Write-Host "      - Save As: Block"
+Write-Host "      - Printing: Block"
+Write-Host "   g. Assign to the group with ID: $($pocGroup.Id)"
+
+Write-Host "`n3. CREATE CONDITIONAL ACCESS POLICY"
+Write-Host "   a. Go to: https://portal.azure.com/#blade/Microsoft_AAD_IAM/ConditionalAccessBlade"
+Write-Host "   b. Click '+ New policy'"
+Write-Host "   c. Name: 'Require Compliant or Protected Apps for O365 (PoC)'"
+Write-Host "   d. Users:"
+Write-Host "      - Include: Select the group with ID: $($pocGroup.Id)"
+if ($excludeUserObjectIds.Count -gt 0) {
+    Write-Host "      - Exclude: The following user IDs:"
+    foreach ($id in $excludeUserObjectIds) {
+        Write-Host "        $id"
+    }
+}
+Write-Host "   e. Cloud apps: Office 365"
+Write-Host "   f. Grant access: Require one of the following controls"
+Write-Host "      - Compliant device"
+Write-Host "      - Approved client app"
+Write-Host "   g. Enable policy: Yes"
+
+Write-Host "`n===== SUCCESS =====" -ForegroundColor Green
 Write-Host "1) Created PoC group with ID: $($pocGroup.Id)"
-
-Write-Host "2) App Protection Policies:"
-if ($iosPolicy -and $iosPolicy.id) {
-    Write-Host "   ✓ iOS MAM policy created and assigned" -ForegroundColor Green
-} else {
-    Write-Host "   ✗ iOS MAM policy creation failed" -ForegroundColor Red
-}
-
-if ($androidPolicy -and $androidPolicy.id) {
-    Write-Host "   ✓ Android MAM policy created and assigned" -ForegroundColor Green
-} else {
-    Write-Host "   ✗ Android MAM policy creation failed" -ForegroundColor Red
-}
-
-Write-Host "3) Conditional Access Policy:"
-if ($caPolicy -and $caPolicy.Id) {
-    Write-Host "   ✓ CA policy created for O365 requiring Compliant or MAM devices" -ForegroundColor Green
-    Write-Host "   ✓ Excluded break-glass / service accounts (where found)" -ForegroundColor Green
-} else {
-    Write-Host "   ✗ CA policy creation failed" -ForegroundColor Red
-}
-
-# Check for overall success
-if (($iosPolicy -and $iosPolicy.id) -or ($androidPolicy -and $androidPolicy.id) -or ($caPolicy -and $caPolicy.Id)) {
-    Write-Host "`nSome operations completed successfully. Check Intune and Entra ID portals to confirm." -ForegroundColor Green
-} else {
-    Write-Host "`nOnly the security group was created. Please check account permissions and try again." -ForegroundColor Yellow
-    Write-Host "Common issues:"
-    Write-Host "1. Your account lacks Intune Administrator or Security Administrator roles"
-    Write-Host "2. The tenant doesn't have the proper licenses for Intune/Conditional Access"
-    Write-Host "3. API permissions may need admin consent in Azure AD"
-}
+Write-Host "2) Created settings file: $settingsFile"
+Write-Host "3) Follow the manual instructions above to complete setup"
+Write-Host "4) Check Intune and Entra ID portals to confirm."
