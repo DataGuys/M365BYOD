@@ -1,0 +1,42 @@
+{
+  "@odata.type": "#microsoft.graph.iosManagedAppProtection",
+  "displayName": "Test Graph MAM iOS Policy",
+  "description": "Test Graph MAM iOS Policy",
+  "periodOfflineBeforeAccessCheck": "PT12H",
+  "periodOnlineBeforeAccessCheck": "PT30M",
+  "allowedInboundDataTransferSources": "allApps",
+  "allowedOutboundDataTransferDestinations": "allApps",
+  "organizationalCredentialsRequired": false,
+  "allowedOutboundClipboardSharingLevel": "allApps",
+  "dataBackupBlocked": true,
+  "deviceComplianceRequired": true,
+  "managedBrowserToOpenLinksRequired": true,
+  "saveAsBlocked": true,
+  "periodOfflineBeforeWipeIsEnforced": "P90D",
+  "pinRequired": true,
+  "maximumPinRetries": 5,
+  "simplePinBlocked": true,
+  "minimumPinLength": 4,
+  "pinCharacterSet": "numeric",
+  "allowedDataStorageLocations": [],
+  "contactSyncBlocked": true,
+  "printBlocked": true,
+  "fingerprintBlocked": true,
+  "appDataEncryptionType": "afterDeviceRestart",
+
+  "apps": [
+    {
+        "mobileAppIdentifier": {
+        "@odata.type": "#microsoft.graph.iosMobileAppIdentifier",
+        "bundleId": "com.microsoft.office.outlook"
+        }
+    },
+    {
+        "mobileAppIdentifier": {
+        "@odata.type": "#microsoft.graph.iosMobileAppIdentifier",
+        "bundleId": "com.microsoft.office.excel"
+        }
+    }
+
+    ]
+}
